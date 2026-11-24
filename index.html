@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feel Your Senses</title>
+  <meta name="description" content="Ton journal de films, séries et jeux vidéo, avec tes notes et tes commentaires.">
+  <meta name="theme-color" content="#0f0f14">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <h1 class="brand">Feel <span>Your</span> Senses</h1>
+      <div class="top-actions">
+        <button class="btn ghost" id="menuBtn" aria-haspopup="true" aria-expanded="false" title="Sauvegarde">⋯</button>
+        <div class="menu" id="menu" hidden>
+          <button id="exportBtn">Exporter (JSON)</button>
+          <label class="menu-file">Importer (JSON)<input type="file" id="importInput" accept="application/json"></label>
+        </div>
+        <button class="btn primary" id="addBtn">+ Ajouter</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="stats" id="stats" aria-label="Statistiques"></section>
+
+    <nav class="tabs" id="tabs" aria-label="Catégories">
+      <button data-type="all" class="active">Tout</button>
+      <button data-type="film">🎬 Films</button>
+      <button data-type="serie">📺 Séries</button>
+      <button data-type="jeu">🎮 Jeux vidéo</button>
+    </nav>
+
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Rechercher un titre, un commentaire…" aria-label="Rechercher">
+      <select id="statusFilter" aria-label="Statut">
+        <option value="all">Tous les statuts</option>
+        <option value="done">Terminé</option>
+        <option value="progress">En cours</option>
+        <option value="wish">Envie</option>
+      </select>
+      <select id="sort" aria-label="Trier">
+        <option value="recent">Plus récents</option>
+        <option value="rating">Mieux notés</option>
+        <option value="title">Titre A → Z</option>
+        <option value="year">Année de sortie</option>
+      </select>
+    </div>
+
+    <section class="grid" id="grid" aria-live="polite"></section>
+    <p class="empty" id="empty" hidden></p>
+  </main>
+
+  <dialog id="dialog">
+    <form id="form" method="dialog">
+      <div class="dlg-head">
+        <h2 id="dlgTitle">Ajouter</h2>
+        <button type="button" class="icon" id="closeBtn" aria-label="Fermer">✕</button>
+      </div>
+
+      <fieldset class="seg" id="typeSeg">
+        <legend>Catégorie</legend>
+        <label><input type="radio" name="type" value="film" checked><span>🎬 Film</span></label>
+        <label><input type="radio" name="type" value="serie"><span>📺 Série</span></label>
+        <label><input type="radio" name="type" value="jeu"><span>🎮 Jeu vidéo</span></label>
+      </fieldset>
+
+      <label class="field">Titre
+        <input name="title" required maxlength="140" autocomplete="off">
+      </label>
+
+      <div class="row">
+        <label class="field">Année de sortie
+          <input name="year" type="number" min="1880" max="2100" inputmode="numeric">
+        </label>
+        <label class="field">Statut
+          <select name="status">
+            <option value="done">Terminé</option>
+            <option value="progress">En cours</option>
+            <option value="wish">Envie</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field">
+        <span>Ma note <output id="ratingOut">—</output></span>
+        <div class="stars" id="stars" role="radiogroup" aria-label="Note sur 10"></div>
+        <input type="hidden" name="rating">
+      </div>
+
+      <label class="field">Mon commentaire
+        <textarea name="comment" rows="5" maxlength="5000" placeholder="Ce que j'en ai pensé, ce que j'ai ressenti…"></textarea>
+      </label>
+
+      <div class="row">
+        <label class="field">Vu / joué le
+          <input name="date" type="date">
+        </label>
+        <label class="field check">
+          <input name="fav" type="checkbox"> <span>♥ Coup de cœur</span>
+        </label>
+      </div>
+
+      <label class="field">Affiche (URL d'image, optionnel)
+        <input name="poster" type="url" placeholder="https://…">
+      </label>
+
+      <div class="dlg-foot">
+        <button type="button" class="btn danger" id="deleteBtn" hidden>Supprimer</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="cancelBtn">Annuler</button>
+        <button type="submit" class="btn primary">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
