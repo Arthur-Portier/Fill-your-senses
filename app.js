@@ -288,23 +288,29 @@
     const file = e.target.files[0]; e.target.value = ''; menu.hidden = true;
     if (!file) return;
     try {
-      const name = file.name.toLowerCase();
-      if (name.endsWith('.zip')) {
-        mergeSequel(parseSequelCsv(await readLibraryCsvFromZip(file)));
-      } else if (name.endsWith('.csv')) {
-        mergeSequel(parseSequelCsv(await file.text()));
-      } else {
-        const data = JSON.parse(await file.text());
-        if (!Array.isArray(data)) throw new Error('format');
+      // Detect the format from the content, not the name: some file pickers drop the extension.
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!bytes.length) throw userError('le fichier est vide');
+      const text = () => new TextDecoder().decode(bytes).replace(/^﻿/, '');
+      if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+        mergeSequel(parseSequelCsv(await readLibraryCsvFromZip(bytes)));
+      } else if (/^\s*[[{]/.test(text())) {
+        let data;
+        try { data = JSON.parse(text()); } catch { throw userError('sauvegarde JSON illisible'); }
+        if (!Array.isArray(data)) throw userError("ce JSON n'est pas une sauvegarde Feel Your Senses");
         const incoming = data.map(normalize).filter(Boolean);
         const byId = new Map(items.map((i) => [i.id, i]));
         incoming.forEach((i) => byId.set(i.id, i));
         items = [...byId.values()];
         save(); render();
         toast(`${incoming.length} élément(s) importé(s)`);
+      } else {
+        mergeSequel(parseSequelCsv(text()));
       }
     } catch (err) {
-      toast(err && err.userMessage ? err.userMessage : 'Fichier invalide');
+      console.error(err);
+      const why = (err && (err.userMessage || err.message)) || 'erreur inconnue';
+      toast(`Import impossible : ${why}`, 6000);
     }
   });
 
@@ -314,8 +320,8 @@
 
   function parseSequelCsv(text) {
     const rows = parseCsv(text.replace(/^﻿/, ''));
-    const head = rows.shift() || [];
-    if (!head.includes('Media Type') || !head.includes('Title')) throw userError("Ce fichier n'est pas un export Sequel");
+    const head = (rows.shift() || []).map((h) => h.trim());
+    if (!head.includes('Media Type') || !head.includes('Title')) throw userError("format non reconnu (ni export Sequel, ni sauvegarde JSON)");
     return rows
       .filter((r) => r.length > 1)
       .map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])))
@@ -352,7 +358,7 @@
   // Re-importing never overwrites what was changed in the app: existing values win,
   // the export only fills in what is missing.
   function mergeSequel(incoming) {
-    if (!incoming.length) throw userError('Aucune œuvre trouvée dans ce fichier');
+    if (!incoming.length) throw userError('aucune œuvre trouvée dans ce fichier');
     const byId = new Map(items.map((i) => [i.id, i]));
     let added = 0;
     incoming.forEach((inc) => {
@@ -372,8 +378,10 @@
     toast(`Sequel : ${added} ajouté(s)${updated ? `, ${updated} déjà présent(s)` : ''}`);
   }
 
+  // "A\, B, C" → ["A, B", "C"] (Sequel escapes commas inside names).
   function splitList(s) {
-    return (s || '').split(/(?<!\\),/).map((x) => x.replace(/\\,/g, ',').trim()).filter(Boolean);
+    return (s || '').replace(/\\,/g, '\u0000').split(',')
+      .map((x) => x.replace(/\u0000/g, ',').trim()).filter(Boolean);
   }
 
   function parseCsv(text) {
@@ -395,19 +403,19 @@
     return rows;
   }
 
-  // Minimal .zip reader: finds Library.csv and inflates it with the browser's own decompressor.
-  async function readLibraryCsvFromZip(file) {
-    const buf = new Uint8Array(await file.arrayBuffer());
-    const dv = new DataView(buf.buffer);
+  // Minimal .zip reader: finds Library.csv and inflates it.
+  async function readLibraryCsvFromZip(buf) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     let eocd = -1;
     for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
       if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
     }
-    if (eocd < 0) throw userError('Archive .zip illisible');
+    if (eocd < 0) throw userError('archive .zip incomplète ou abîmée');
     const count = dv.getUint16(eocd + 10, true);
     let p = dv.getUint32(eocd + 16, true);
     const dec = new TextDecoder();
-    for (let n = 0; n < count; n++) {
+    const names = [];
+    for (let n = 0; n < count && p + 46 <= buf.length; n++) {
       if (dv.getUint32(p, true) !== 0x02014b50) break;
       const method = dv.getUint16(p + 10, true);
       const size = dv.getUint32(p + 20, true);
@@ -417,18 +425,114 @@
       const local = dv.getUint32(p + 42, true);
       const name = dec.decode(buf.subarray(p + 46, p + 46 + nameLen));
       p += 46 + nameLen + extraLen + commentLen;
-      if (!/(^|\/)Library\.csv$/.test(name) || name.startsWith('__MACOSX')) continue;
+      names.push(name);
+      if (!/(^|\/)Library\.csv$/i.test(name) || name.startsWith('__MACOSX')) continue;
       const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
       const data = buf.subarray(start, start + size);
       if (method === 0) return dec.decode(data);
-      if (method !== 8) throw userError('Compression .zip non prise en charge');
-      if (typeof DecompressionStream === 'undefined') {
-        throw userError('Navigateur trop ancien pour lire le .zip : importe Library.csv à la place');
-      }
-      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-      return await new Response(stream).text();
+      if (method !== 8) throw userError(`compression .zip non prise en charge (méthode ${method})`);
+      return dec.decode(await inflate(data));
     }
-    throw userError('Library.csv introuvable dans le .zip');
+    throw userError(`Library.csv introuvable dans le .zip (contenu : ${names.slice(0, 5).join(', ') || 'vide'})`);
+  }
+
+  // Browser decompressor when available, otherwise the built-in one below.
+  async function inflate(data) {
+    try {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      return inflateRaw(data);
+    }
+  }
+
+  // Small raw-DEFLATE decoder (RFC 1951), used when the browser has no DecompressionStream.
+  function inflateRaw(src) {
+    const LBASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+    const LEXT = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+    const DBASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+    const DEXT = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+    const ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let pos = 0, bitBuf = 0, bitCnt = 0;
+    let out = new Uint8Array(Math.max(1024, src.length * 4)), op = 0;
+    const fail = () => { throw userError('données compressées invalides'); };
+    const ensure = (n) => {
+      if (op + n <= out.length) return;
+      const t = new Uint8Array(Math.max(out.length * 2, op + n)); t.set(out); out = t;
+    };
+    const bit = () => {
+      if (!bitCnt) { if (pos >= src.length) fail(); bitBuf = src[pos++]; bitCnt = 8; }
+      const b = bitBuf & 1; bitBuf >>= 1; bitCnt--; return b;
+    };
+    const bitsN = (n) => { let v = 0; for (let i = 0; i < n; i++) v |= bit() << i; return v; };
+    const build = (lengths) => {
+      const counts = new Uint16Array(16), offs = new Uint16Array(16), symbols = new Uint16Array(lengths.length);
+      lengths.forEach((l) => { counts[l]++; });
+      counts[0] = 0;
+      for (let i = 1; i < 16; i++) offs[i] = offs[i - 1] + counts[i - 1];
+      lengths.forEach((l, s) => { if (l) symbols[offs[l]++] = s; });
+      return { counts, symbols };
+    };
+    const decode = (h) => {
+      let code = 0, first = 0, index = 0;
+      for (let len = 1; len < 16; len++) {
+        code |= bit();
+        const c = h.counts[len];
+        if (code - c < first) return h.symbols[index + (code - first)];
+        index += c; first = (first + c) << 1; code <<= 1;
+      }
+      return fail();
+    };
+    let fixedL, fixedD;
+    let last;
+    do {
+      last = bit();
+      const type = bitsN(2);
+      if (type === 0) {
+        bitCnt = 0;
+        if (pos + 4 > src.length) fail();
+        const len = src[pos] | (src[pos + 1] << 8); pos += 4;
+        if (pos + len > src.length) fail();
+        ensure(len); out.set(src.subarray(pos, pos + len), op); op += len; pos += len;
+        continue;
+      }
+      let lcode, dcode;
+      if (type === 1) {
+        if (!fixedL) {
+          const l = new Array(288);
+          for (let i = 0; i < 288; i++) l[i] = i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8;
+          fixedL = build(l); fixedD = build(new Array(30).fill(5));
+        }
+        lcode = fixedL; dcode = fixedD;
+      } else if (type === 2) {
+        const hlit = bitsN(5) + 257, hdist = bitsN(5) + 1, hclen = bitsN(4) + 4;
+        const cl = new Array(19).fill(0);
+        for (let i = 0; i < hclen; i++) cl[ORDER[i]] = bitsN(3);
+        const clCode = build(cl);
+        const lens = [];
+        while (lens.length < hlit + hdist) {
+          const sym = decode(clCode);
+          if (sym < 16) lens.push(sym);
+          else if (sym === 16) { if (!lens.length) fail(); const prev = lens[lens.length - 1]; for (let r = 3 + bitsN(2); r; r--) lens.push(prev); }
+          else if (sym === 17) for (let r = 3 + bitsN(3); r; r--) lens.push(0);
+          else for (let r = 11 + bitsN(7); r; r--) lens.push(0);
+        }
+        lcode = build(lens.slice(0, hlit)); dcode = build(lens.slice(hlit, hlit + hdist));
+      } else fail();
+      for (;;) {
+        let sym = decode(lcode);
+        if (sym < 256) { ensure(1); out[op++] = sym; continue; }
+        if (sym === 256) break;
+        sym -= 257; if (sym >= 29) fail();
+        const len = LBASE[sym] + bitsN(LEXT[sym]);
+        const ds = decode(dcode); if (ds >= 30) fail();
+        const dist = DBASE[ds] + bitsN(DEXT[ds]);
+        if (dist > op) fail();
+        ensure(len);
+        for (let i = 0; i < len; i++, op++) out[op] = out[op - dist];
+      }
+    } while (!last);
+    return out.subarray(0, op);
   }
 
   // ---------- Utils ----------
@@ -441,9 +545,9 @@
     return isNaN(d) ? '' : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
   }
   let toastTimer;
-  function toast(msg) {
+  function toast(msg, ms = 3000) {
     const t = $('#toast'); t.textContent = msg; t.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3000);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms);
   }
 
   buildStars();

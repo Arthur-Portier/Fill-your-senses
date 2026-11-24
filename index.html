@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <header class="top">
@@ -21,6 +21,7 @@
           <button id="exportBtn">Exporter (JSON)</button>
           <label class="menu-file">Importer une sauvegarde (JSON)<input type="file" id="importInput" accept=".json,.zip,.csv,application/json,application/zip,text/csv"></label>
           <label class="menu-file" for="importInput">Importer depuis Sequel (.zip)</label>
+          <small class="menu-version">Version 3</small>
         </div>
         <button class="btn primary" id="addBtn">+ Ajouter</button>
       </div>
@@ -126,6 +127,6 @@
 
   <div class="toast" id="toast" role="status" hidden></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
