@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Feel Your Senses</title>
-  <meta name="description" content="Ton journal de films, séries et jeux vidéo, avec tes notes et tes commentaires.">
+  <meta name="description" content="Ton journal de films, séries, jeux vidéo et livres, avec tes notes et tes commentaires.">
   <meta name="theme-color" content="#0f0f14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,7 +19,8 @@
         <button class="btn ghost" id="menuBtn" aria-haspopup="true" aria-expanded="false" title="Sauvegarde">⋯</button>
         <div class="menu" id="menu" hidden>
           <button id="exportBtn">Exporter (JSON)</button>
-          <label class="menu-file">Importer (JSON)<input type="file" id="importInput" accept="application/json"></label>
+          <label class="menu-file">Importer une sauvegarde (JSON)<input type="file" id="importInput" accept=".json,.zip,.csv,application/json,application/zip,text/csv"></label>
+          <label class="menu-file" for="importInput">Importer depuis Sequel (.zip)</label>
         </div>
         <button class="btn primary" id="addBtn">+ Ajouter</button>
       </div>
@@ -34,6 +35,7 @@
       <button data-type="film">🎬 Films</button>
       <button data-type="serie">📺 Séries</button>
       <button data-type="jeu">🎮 Jeux vidéo</button>
+      <button data-type="livre">📚 Livres</button>
     </nav>
 
     <div class="toolbar">
@@ -43,6 +45,7 @@
         <option value="done">Terminé</option>
         <option value="progress">En cours</option>
         <option value="wish">Envie</option>
+        <option value="dropped">Abandonné</option>
       </select>
       <select id="sort" aria-label="Trier">
         <option value="recent">Plus récents</option>
@@ -68,6 +71,7 @@
         <label><input type="radio" name="type" value="film" checked><span>🎬 Film</span></label>
         <label><input type="radio" name="type" value="serie"><span>📺 Série</span></label>
         <label><input type="radio" name="type" value="jeu"><span>🎮 Jeu vidéo</span></label>
+        <label><input type="radio" name="type" value="livre"><span>📚 Livre</span></label>
       </fieldset>
 
       <label class="field">Titre
@@ -83,6 +87,7 @@
             <option value="done">Terminé</option>
             <option value="progress">En cours</option>
             <option value="wish">Envie</option>
+            <option value="dropped">Abandonné</option>
           </select>
         </label>
       </div>
@@ -98,7 +103,7 @@
       </label>
 
       <div class="row">
-        <label class="field">Vu / joué le
+        <label class="field">Terminé le
           <input name="date" type="date">
         </label>
         <label class="field check">

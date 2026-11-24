@@ -3,14 +3,16 @@
 
   const STORAGE_KEY = 'feel-your-senses:v1';
   const TYPES = {
-    film:  { label: 'Film',      plural: 'Films',      color: 'var(--film)',  grad: ['#ff8a4c', '#c2255c'] },
-    serie: { label: 'Série',     plural: 'Séries',     color: 'var(--serie)', grad: ['#845ef7', '#3b5bdb'] },
-    jeu:   { label: 'Jeu vidéo', plural: 'Jeux vidéo', color: 'var(--jeu)',   grad: ['#22b8cf', '#2b8a3e'] },
+    film:  { label: 'Film',      color: 'var(--film)',  grad: ['#ff8a4c', '#c2255c'] },
+    serie: { label: 'Série',     color: 'var(--serie)', grad: ['#845ef7', '#3b5bdb'] },
+    jeu:   { label: 'Jeu vidéo', color: 'var(--jeu)',   grad: ['#22b8cf', '#2b8a3e'] },
+    livre: { label: 'Livre',     color: 'var(--livre)', grad: ['#f59f00', '#a61e4d'] },
   };
   const STATUS = {
-    done:     { film: 'Vu',       serie: 'Vue',      jeu: 'Terminé' },
-    progress: { film: 'En cours', serie: 'En cours', jeu: 'En cours' },
-    wish:     { film: 'Envie',    serie: 'Envie',    jeu: 'Envie' },
+    done:     { film: 'Vu',        serie: 'Vue',        jeu: 'Terminé',   livre: 'Lu' },
+    progress: { film: 'En cours',  serie: 'En cours',   jeu: 'En cours',  livre: 'En cours' },
+    wish:     { film: 'Envie',     serie: 'Envie',      jeu: 'Envie',     livre: 'Envie' },
+    dropped:  { film: 'Abandonné', serie: 'Abandonnée', jeu: 'Abandonné', livre: 'Abandonné' },
   };
 
   // ---------- Storage ----------
@@ -30,17 +32,25 @@
   function normalize(it) {
     if (!it || typeof it.title !== 'string' || !it.title.trim()) return null;
     const rating = Number(it.rating);
+    const ep = it.episodes;
     return {
       id: String(it.id || uid()),
       type: TYPES[it.type] ? it.type : 'film',
-      title: it.title.trim().slice(0, 140),
+      title: it.title.trim().slice(0, 200),
       year: it.year ? Number(it.year) || null : null,
       status: STATUS[it.status] ? it.status : 'done',
       rating: rating >= 1 && rating <= 10 ? Math.round(rating) : null,
       comment: typeof it.comment === 'string' ? it.comment.slice(0, 5000) : '',
-      date: typeof it.date === 'string' ? it.date : '',
+      date: typeof it.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : '',
       fav: !!it.fav,
       poster: typeof it.poster === 'string' && /^https?:\/\//i.test(it.poster) ? it.poster : '',
+      author: typeof it.author === 'string' ? it.author.trim().slice(0, 200) : '',
+      collections: Array.isArray(it.collections)
+        ? it.collections.filter((c) => typeof c === 'string' && c.trim()).map((c) => c.trim().slice(0, 80)).slice(0, 20)
+        : [],
+      episodes: ep && Number(ep.total) > 0
+        ? { watched: Math.max(0, parseInt(ep.watched, 10) || 0), total: parseInt(ep.total, 10) }
+        : null,
       createdAt: Number(it.createdAt) || Date.now(),
       updatedAt: Number(it.updatedAt) || Date.now(),
     };
@@ -63,10 +73,10 @@
   function render() {
     renderStats();
     const q = norm(state.q);
-    let list = items.filter((it) =>
+    const list = items.filter((it) =>
       (state.type === 'all' || it.type === state.type) &&
       (state.status === 'all' || it.status === state.status) &&
-      (!q || norm(it.title).includes(q) || norm(it.comment).includes(q))
+      (!q || [it.title, it.comment, it.author, ...it.collections].some((s) => norm(s).includes(q)))
     );
     list.sort(sorters[state.sort]);
 
@@ -75,7 +85,7 @@
     empty.hidden = false;
     empty.textContent = items.length
       ? 'Rien ne correspond à ta recherche.'
-      : 'Ta collection est vide. Ajoute ton premier film, ta première série ou ton premier jeu avec « + Ajouter ».';
+      : 'Ta collection est vide. Ajoute un film, une série, un jeu ou un livre avec « + Ajouter », ou importe ton export Sequel depuis le menu ⋯.';
   }
 
   const sorters = {
@@ -94,6 +104,7 @@
       [count('film'), 'films', TYPES.film.color],
       [count('serie'), 'séries', TYPES.serie.color],
       [count('jeu'), 'jeux vidéo', TYPES.jeu.color],
+      [count('livre'), 'livres', TYPES.livre.color],
       [avg, 'note moyenne', 'var(--gold)'],
     ].forEach(([v, l, c]) => {
       const d = el('div', 'stat');
@@ -131,9 +142,20 @@
     const body = el('div', 'card-body');
     const title = el('div', 'card-title'); title.textContent = it.title;
     const meta = el('div', 'meta');
-    meta.textContent = [it.year, STATUS[it.status][it.type], it.date && formatDate(it.date)].filter(Boolean).join(' · ');
+    meta.textContent = [
+      it.author,
+      it.year,
+      STATUS[it.status][it.type],
+      it.episodes && `${it.episodes.watched}/${it.episodes.total} ép.`,
+      it.date && formatDate(it.date),
+    ].filter(Boolean).join(' · ');
     body.append(title, meta);
     if (it.comment) { const cm = el('p', 'comment'); cm.textContent = `« ${it.comment} »`; body.append(cm); }
+    if (it.collections.length) {
+      const tags = el('div', 'tags');
+      it.collections.forEach((name) => { const s = el('span', 'tag'); s.textContent = name; tags.append(s); });
+      body.append(tags);
+    }
 
     c.append(p, body);
     return c;
@@ -196,7 +218,10 @@
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!form.reportValidity()) return;
+    // Keep the fields the form does not edit (author, collections, episodes, createdAt…).
+    const prev = (editingId && items.find((i) => i.id === editingId)) || { createdAt: Date.now() };
     const data = normalize({
+      ...prev,
       id: editingId || uid(),
       type: form.querySelector('input[name=type]:checked').value,
       title: F.title.value,
@@ -207,7 +232,6 @@
       date: F.date.value,
       fav: F.fav.checked,
       poster: F.poster.value.trim(),
-      createdAt: editingId ? items.find((i) => i.id === editingId)?.createdAt : Date.now(),
       updatedAt: Date.now(),
     });
     if (!data) return;
@@ -264,18 +288,151 @@
     const file = e.target.files[0]; e.target.value = ''; menu.hidden = true;
     if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      if (!Array.isArray(data)) throw new Error();
-      const incoming = data.map(normalize).filter(Boolean);
-      const byId = new Map(items.map((i) => [i.id, i]));
-      incoming.forEach((i) => byId.set(i.id, i));
-      items = [...byId.values()];
-      save(); render();
-      toast(`${incoming.length} élément(s) importé(s)`);
-    } catch { toast('Fichier invalide'); }
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.zip')) {
+        mergeSequel(parseSequelCsv(await readLibraryCsvFromZip(file)));
+      } else if (name.endsWith('.csv')) {
+        mergeSequel(parseSequelCsv(await file.text()));
+      } else {
+        const data = JSON.parse(await file.text());
+        if (!Array.isArray(data)) throw new Error('format');
+        const incoming = data.map(normalize).filter(Boolean);
+        const byId = new Map(items.map((i) => [i.id, i]));
+        incoming.forEach((i) => byId.set(i.id, i));
+        items = [...byId.values()];
+        save(); render();
+        toast(`${incoming.length} élément(s) importé(s)`);
+      }
+    } catch (err) {
+      toast(err && err.userMessage ? err.userMessage : 'Fichier invalide');
+    }
   });
 
+  // ---------- Sequel import ----------
+  const SEQ_TYPE = { Movie: 'film', Series: 'serie', Game: 'jeu', Book: 'livre', Audiobook: 'livre' };
+  const SEQ_STATUS = { Completed: 'done', Ongoing: 'progress', Wishlist: 'wish', Library: 'wish', Abandoned: 'dropped' };
+
+  function parseSequelCsv(text) {
+    const rows = parseCsv(text.replace(/^﻿/, ''));
+    const head = rows.shift() || [];
+    if (!head.includes('Media Type') || !head.includes('Title')) throw userError("Ce fichier n'est pas un export Sequel");
+    return rows
+      .filter((r) => r.length > 1)
+      .map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])))
+      .map(fromSequel)
+      .filter(Boolean);
+  }
+
+  function fromSequel(r) {
+    const type = SEQ_TYPE[r['Media Type']];
+    if (!type) return null; // episode rows are summarised on their show
+    const watched = parseInt(r['Episodes Watched'], 10) || 0;
+    const total = parseInt(r['Episodes Total'], 10) || 0;
+    let status = SEQ_STATUS[r.Status] || 'wish';
+    if (type === 'serie' && status === 'wish' && watched > 0) status = total && watched >= total ? 'done' : 'progress';
+    const rating = parseFloat(String(r.Rating).replace(',', '.'));
+    const added = Date.parse((r['Date Added'] || '').replace(' ', 'T') + 'Z');
+    return normalize({
+      id: r['Sequel ID'] ? `sequel-${r['Sequel ID']}` : undefined,
+      type,
+      title: r.Title,
+      year: r['Release Year'],
+      status,
+      rating: rating > 0 ? rating * 2 : null, // Sequel rates out of 5
+      comment: (r.Notes || '').trim(),
+      date: (r['Date Completed'] || '').slice(0, 10),
+      poster: r.Cover,
+      author: r.Author,
+      collections: splitList(r.Collections),
+      episodes: type === 'serie' && total ? { watched, total } : null,
+      createdAt: added || Date.now(),
+    });
+  }
+
+  // Re-importing never overwrites what was changed in the app: existing values win,
+  // the export only fills in what is missing.
+  function mergeSequel(incoming) {
+    if (!incoming.length) throw userError('Aucune œuvre trouvée dans ce fichier');
+    const byId = new Map(items.map((i) => [i.id, i]));
+    let added = 0;
+    incoming.forEach((inc) => {
+      const cur = byId.get(inc.id);
+      if (!cur) { byId.set(inc.id, inc); added++; return; }
+      const merged = { ...inc };
+      Object.entries(cur).forEach(([k, v]) => {
+        const emptyVal = v === '' || v === null || v === false || (Array.isArray(v) && !v.length);
+        if (!emptyVal) merged[k] = v;
+      });
+      if (inc.episodes) merged.episodes = inc.episodes; // progress always comes from Sequel
+      byId.set(inc.id, normalize(merged));
+    });
+    items = [...byId.values()];
+    save(); render();
+    const updated = incoming.length - added;
+    toast(`Sequel : ${added} ajouté(s)${updated ? `, ${updated} déjà présent(s)` : ''}`);
+  }
+
+  function splitList(s) {
+    return (s || '').split(/(?<!\\),/).map((x) => x.replace(/\\,/g, ',').trim()).filter(Boolean);
+  }
+
+  function parseCsv(text) {
+    const rows = []; let row = []; let field = ''; let quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (quoted) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false;
+        } else field += ch;
+      } else if (ch === '"') quoted = true;
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); rows.push(row); row = []; field = '';
+      } else field += ch;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  // Minimal .zip reader: finds Library.csv and inflates it with the browser's own decompressor.
+  async function readLibraryCsvFromZip(file) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const dv = new DataView(buf.buffer);
+    let eocd = -1;
+    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw userError('Archive .zip illisible');
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const dec = new TextDecoder();
+    for (let n = 0; n < count; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true);
+      const size = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true);
+      const extraLen = dv.getUint16(p + 30, true);
+      const commentLen = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      const name = dec.decode(buf.subarray(p + 46, p + 46 + nameLen));
+      p += 46 + nameLen + extraLen + commentLen;
+      if (!/(^|\/)Library\.csv$/.test(name) || name.startsWith('__MACOSX')) continue;
+      const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+      const data = buf.subarray(start, start + size);
+      if (method === 0) return dec.decode(data);
+      if (method !== 8) throw userError('Compression .zip non prise en charge');
+      if (typeof DecompressionStream === 'undefined') {
+        throw userError('Navigateur trop ancien pour lire le .zip : importe Library.csv à la place');
+      }
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return await new Response(stream).text();
+    }
+    throw userError('Library.csv introuvable dans le .zip');
+  }
+
   // ---------- Utils ----------
+  function userError(msg) { const e = new Error(msg); e.userMessage = msg; return e; }
   function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
   function norm(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
   function today() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
@@ -286,7 +443,7 @@
   let toastTimer;
   function toast(msg) {
     const t = $('#toast'); t.textContent = msg; t.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3000);
   }
 
   buildStars();
